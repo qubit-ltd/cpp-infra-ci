@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "owner": "cpp-infra-ci",
+  "files": [
+    {
+      "source": "ci/policy/github.py",
+      "target": ".infra/ci/policy/github.py",
+      "sha256": "1580aace0483e09525a789a9f8aab92be72f404a6b34687d61721b7ea6337b8c",
+      "executable": false
+    }
+  ],
+  "project_files": [
+    {
+      "source": "ci/config.example.toml",
+      "target": ".infra/ci/config.toml",
+      "sha256": "1e0efee9e4e97d3782f0b726565881c2f19677534688bd60733f364fc8058c8a",
+      "executable": false
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+schema = 1
+tasks = ["style", "verify"]
+primary_profile = "debug"
+local_fail_fast = true
+task_jobs = 1
+matrix_max_parallel = 4
+timeout_seconds = 1800
+require_complete_matrix = false
+
+[[matrix]]
+id = "linux-debug"
+runner = "ubuntu-latest"
+os = "linux"
+arch = "x86_64"
+profile = "debug"
+suites = ["build", "test", "headers", "install"]

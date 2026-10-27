@@ -1,0 +1,30 @@
+[package]
+name = "qubit-cpp-infra-ci"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+description = "Contract-driven C++ infrastructure task scheduler"
+license = "Apache-2.0"
+repository = "https://github.com/qubit-ltd/cpp-infra-ci"
+include = ["src/**", "build.rs", "conf/**", "assets/**", "schemas/**", "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "README.zh_CN.md", "rust-toolchain.toml"]
+
+[lib]
+name = "cpp_infra_ci"
+
+[[bin]]
+name = "cpp-infra-ci"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+libc = "0.2"
+ctrlc = "3"
+
+[dev-dependencies]
+tempfile = "3"
