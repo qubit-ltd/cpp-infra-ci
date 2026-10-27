@@ -1,0 +1,353 @@
+# SPDX-License-Identifier: Apache-2.0
+# Consumer wrapper: uses: qubit-ltd/cpp-infra-ci/.github/workflows/cpp-ci.yml@main
+name: C++ infrastructure
+on:
+  workflow_call:
+    inputs:
+      publish_pages:
+        type: boolean
+        default: false
+        description: Deploy only a successful default-branch run to GitHub Pages
+permissions:
+  contents: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.outputs.outputs.matrix }}
+      has_matrix: ${{ steps.outputs.outputs.has_matrix }}
+      max_parallel: ${{ steps.outputs.outputs.max_parallel }}
+      light: ${{ steps.outputs.outputs.light }}
+      analysis: ${{ steps.outputs.outputs.analysis }}
+      hooks: ${{ steps.outputs.outputs.hooks }}
+      pages: ${{ steps.outputs.outputs.pages }}
+      run_id: ${{ steps.outputs.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Resolve main once for the complete workflow
+        shell: bash
+        run: python3 .infra/bootstrap.py resolve --output build/ci/revisions.json
+      - name: Validate configuration and emit the complete expected-task manifest
+        shell: bash
+        env:
+          CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+        run: python3 .infra/bootstrap.py run --tool cpp-infra-ci -- matrix plan --output build/ci/matrix.json
+      - id: outputs
+        shell: bash
+        run: python3 .infra/ci/policy/github.py build/ci/matrix.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-plan-${{ steps.outputs.outputs.run_id }}
+          path: build/ci/
+          if-no-files-found: error
+  light:
+    needs: [plan]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.plan.outputs.light != '') }}
+    runs-on: ubuntu-latest
+    env:
+      CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+      WORK_REPORT_ROOT: ${{ github.workspace }}/build/infra-runs/${{ needs.plan.outputs.run_id }}
+      TASK_IDS: ${{ needs.plan.outputs.light }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-plan-${{ needs.plan.outputs.run_id }}
+          path: build/ci/
+      - name: Execute the owned nodes using the shared manifest and verified prerequisites
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          execute --manifest build/ci/run-manifest.json --task-ids "$TASK_IDS"
+          --output-dir "$WORK_REPORT_ROOT" --require-existing-dependencies
+      - name: Preserve owned reports, logs, and nested tool artifacts after failure
+        if: always()
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          export --input-dir "$WORK_REPORT_ROOT" --task-ids "$TASK_IDS"
+          --output-dir build/ci-upload --allow-missing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-results-light-${{ needs.plan.outputs.run_id }}
+          path: build/ci-upload/
+          if-no-files-found: warn
+  matrix:
+    needs: [plan, light]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.plan.outputs.has_matrix == 'true') }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+      WORK_REPORT_ROOT: ${{ github.workspace }}/build/infra-runs/${{ needs.plan.outputs.run_id }}
+      TASK_IDS: ${{ matrix.task_ids }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-plan-${{ needs.plan.outputs.run_id }}
+          path: build/ci/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: ci-results-*
+          merge-multiple: true
+          path: build/infra-runs/${{ needs.plan.outputs.run_id }}/
+      - name: Execute the owned nodes using the shared manifest and verified prerequisites
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          execute --manifest build/ci/run-manifest.json --task-ids "$TASK_IDS"
+          --output-dir "$WORK_REPORT_ROOT" --require-existing-dependencies
+      - name: Preserve owned reports, logs, and nested tool artifacts after failure
+        if: always()
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          export --input-dir "$WORK_REPORT_ROOT" --task-ids "$TASK_IDS"
+          --output-dir build/ci-upload --allow-missing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-results-matrix-${{ matrix.id }}-${{ needs.plan.outputs.run_id }}
+          path: build/ci-upload/
+          if-no-files-found: warn
+  analysis:
+    needs: [plan, light]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.plan.outputs.analysis != '') }}
+    runs-on: ubuntu-latest
+    env:
+      CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+      WORK_REPORT_ROOT: ${{ github.workspace }}/build/infra-runs/${{ needs.plan.outputs.run_id }}
+      TASK_IDS: ${{ needs.plan.outputs.analysis }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-plan-${{ needs.plan.outputs.run_id }}
+          path: build/ci/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: ci-results-*
+          merge-multiple: true
+          path: build/infra-runs/${{ needs.plan.outputs.run_id }}/
+      - name: Execute the owned nodes using the shared manifest and verified prerequisites
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          execute --manifest build/ci/run-manifest.json --task-ids "$TASK_IDS"
+          --output-dir "$WORK_REPORT_ROOT" --require-existing-dependencies
+      - name: Preserve owned reports, logs, and nested tool artifacts after failure
+        if: always()
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          export --input-dir "$WORK_REPORT_ROOT" --task-ids "$TASK_IDS"
+          --output-dir build/ci-upload --allow-missing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-results-analysis-${{ needs.plan.outputs.run_id }}
+          path: build/ci-upload/
+          if-no-files-found: warn
+  hooks:
+    needs: [plan, light, matrix, analysis]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.plan.outputs.hooks != '') }}
+    runs-on: ubuntu-latest
+    env:
+      CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+      WORK_REPORT_ROOT: ${{ github.workspace }}/build/infra-runs/${{ needs.plan.outputs.run_id }}
+      TASK_IDS: ${{ needs.plan.outputs.hooks }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-plan-${{ needs.plan.outputs.run_id }}
+          path: build/ci/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: ci-results-*
+          merge-multiple: true
+          path: build/infra-runs/${{ needs.plan.outputs.run_id }}/
+      - name: Execute the owned nodes using the shared manifest and verified prerequisites
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          execute --manifest build/ci/run-manifest.json --task-ids "$TASK_IDS"
+          --output-dir "$WORK_REPORT_ROOT" --require-existing-dependencies
+      - name: Preserve owned reports, logs, and nested tool artifacts after failure
+        if: always()
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          export --input-dir "$WORK_REPORT_ROOT" --task-ids "$TASK_IDS"
+          --output-dir build/ci-upload --allow-missing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-results-hooks-${{ needs.plan.outputs.run_id }}
+          path: build/ci-upload/
+          if-no-files-found: warn
+  quality-summary:
+    needs: [plan, light, matrix, analysis, hooks]
+    if: ${{ always() && needs.plan.result == 'success' && (true) }}
+    runs-on: ubuntu-latest
+    env:
+      CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+      WORK_REPORT_ROOT: ${{ github.workspace }}/build/infra-runs/${{ needs.plan.outputs.run_id }}
+      TASK_IDS: quality-summary
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-plan-${{ needs.plan.outputs.run_id }}
+          path: build/ci/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: ci-results-*
+          merge-multiple: true
+          path: build/infra-runs/${{ needs.plan.outputs.run_id }}/
+      - name: Execute the owned nodes using the shared manifest and verified prerequisites
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          execute --manifest build/ci/run-manifest.json --task-ids "$TASK_IDS"
+          --output-dir "$WORK_REPORT_ROOT" --require-existing-dependencies
+      - name: Preserve owned reports, logs, and nested tool artifacts after failure
+        if: always()
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          export --input-dir "$WORK_REPORT_ROOT" --task-ids "$TASK_IDS"
+          --output-dir build/ci-upload --allow-missing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-results-quality-summary-${{ needs.plan.outputs.run_id }}
+          path: build/ci-upload/
+          if-no-files-found: warn
+  pages-build:
+    needs: [plan, quality-summary]
+    if: ${{ always() && needs.plan.result == 'success' && (needs.plan.outputs.pages != '') }}
+    runs-on: ubuntu-latest
+    env:
+      CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+      WORK_REPORT_ROOT: ${{ github.workspace }}/build/infra-runs/${{ needs.plan.outputs.run_id }}
+      TASK_IDS: ${{ needs.plan.outputs.pages }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-plan-${{ needs.plan.outputs.run_id }}
+          path: build/ci/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: ci-results-*
+          merge-multiple: true
+          path: build/infra-runs/${{ needs.plan.outputs.run_id }}/
+      - name: Execute the owned nodes using the shared manifest and verified prerequisites
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          execute --manifest build/ci/run-manifest.json --task-ids "$TASK_IDS"
+          --output-dir "$WORK_REPORT_ROOT" --require-existing-dependencies
+      - name: Preserve owned reports, logs, and nested tool artifacts after failure
+        if: always()
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          export --input-dir "$WORK_REPORT_ROOT" --task-ids "$TASK_IDS"
+          --output-dir build/ci-upload --allow-missing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-results-pages-build-${{ needs.plan.outputs.run_id }}
+          path: build/ci-upload/
+          if-no-files-found: warn
+      - id: site
+        name: Discover the verified private Pages site artifact
+        if: ${{ success() && inputs.publish_pages && github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci -- artifact-path \
+            --manifest build/ci/run-manifest.json --input-dir "$WORK_REPORT_ROOT" \
+            --task-id pages --kind site > "$WORK_REPORT_ROOT/pages-upload-path.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          value = json.loads((Path(os.environ['WORK_REPORT_ROOT']) / 'pages-upload-path.json').read_text())['path']
+          if '\n' in value or '\r' in value:
+              raise ValueError('Invalid Pages artifact path')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'path={value}\n')
+          PY
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa
+        if: ${{ success() && inputs.publish_pages && github.event_name != 'pull_request' }}
+        with:
+          path: ${{ steps.site.outputs.path }}
+  final-summary:
+    needs: [plan, quality-summary, pages-build]
+    if: ${{ always() && needs.plan.result == 'success' && (true) }}
+    runs-on: ubuntu-latest
+    env:
+      CPP_INFRA_REVISIONS_FILE: ${{ github.workspace }}/build/ci/revisions.json
+      WORK_REPORT_ROOT: ${{ github.workspace }}/build/infra-runs/${{ needs.plan.outputs.run_id }}
+      TASK_IDS: final-summary
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-plan-${{ needs.plan.outputs.run_id }}
+          path: build/ci/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          pattern: ci-results-*
+          merge-multiple: true
+          path: build/infra-runs/${{ needs.plan.outputs.run_id }}/
+      - name: Execute the owned nodes using the shared manifest and verified prerequisites
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          execute --manifest build/ci/run-manifest.json --task-ids "$TASK_IDS"
+          --output-dir "$WORK_REPORT_ROOT" --require-existing-dependencies
+      - name: Preserve owned reports, logs, and nested tool artifacts after failure
+        if: always()
+        shell: bash
+        run: >-
+          python3 .infra/bootstrap.py run --tool cpp-infra-ci --
+          export --input-dir "$WORK_REPORT_ROOT" --task-ids "$TASK_IDS"
+          --output-dir build/ci-upload --allow-missing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-results-final-summary-${{ needs.plan.outputs.run_id }}
+          path: build/ci-upload/
+          if-no-files-found: warn
+  pages-deploy:
+    needs: [plan, pages-build, final-summary]
+    if: >-
+      ${{ always() && inputs.publish_pages &&
+          github.event_name != 'pull_request' &&
+          needs.pages-build.result == 'success' &&
+          needs.final-summary.result == 'success' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
