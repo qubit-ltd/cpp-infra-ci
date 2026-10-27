@@ -148,10 +148,12 @@ impl EvidenceRun {
             .iter_mut()
             .find(|entry| entry["kind"] == "tool-report")
             .expect("original child reference");
-        reference["sha256"] = json!(format!(
-            "{:x}",
+        reference["sha256"] = json!(
             Sha256::digest(fs::read(child_path).expect("changed child bytes"))
-        ));
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
         write_json(&path, &wrapper);
     }
 }
@@ -461,7 +463,7 @@ fn test_explicit_required_log_artifact_is_authenticated_by_summary() {
     // Only explicitly declared artifacts carry the public SHA256 guarantee.
     let mut child = read_json(&run.reports.join("style-tool.json"));
     child["artifacts"].as_array_mut().expect("child artifacts").push(json!({
-        "kind": "log", "path": log, "sha256": format!("{:x}", Sha256::digest(original.as_bytes())), "required": true,
+        "kind": "log", "path": log, "sha256": Sha256::digest(original.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>(), "required": true,
     }));
     run.replace_child("style", &child);
     successful_json(&run.summarize("final"));

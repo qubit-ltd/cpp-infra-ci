@@ -17,7 +17,7 @@ use sha2::Sha256;
 use crate::error::Error;
 
 pub(crate) fn bytes(data: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(data))
+    Sha256::digest(data).iter().map(|byte| format!("{byte:02x}")).collect()
 }
 pub(crate) fn file(path: &Path) -> Result<String, Error> {
     Ok(bytes(&fs::read(path)?))
@@ -41,7 +41,7 @@ pub(crate) fn project(root: &Path, config: bool) -> Result<String, Error> {
         hash.update((data.len() as u64).to_le_bytes());
         hash.update(data);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 fn walk(root: &Path, dir: &Path, config: bool, files: &mut Vec<String>) -> Result<(), Error> {
     for entry in fs::read_dir(dir)? {
@@ -98,7 +98,7 @@ pub(crate) fn artifact(path: &Path) -> Result<String, Error> {
         hash.update((content.len() as u64).to_le_bytes());
         hash.update(content);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 fn artifact_walk(root: &Path, path: &Path, files: &mut Vec<String>) -> Result<(), Error> {
     for entry in fs::read_dir(path)? {

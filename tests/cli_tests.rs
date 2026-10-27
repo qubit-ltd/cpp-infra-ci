@@ -773,7 +773,12 @@ fn test_review_summary_authenticates_wrapper_and_child_evidence() {
             fs::write(&child, &bytes).expect("raw mutation");
             use sha2::Digest;
             use sha2::Sha256;
-            value["artifacts"][0]["sha256"] = serde_json::json!(format!("{:x}", Sha256::digest(&bytes)));
+            value["artifacts"][0]["sha256"] = serde_json::json!(
+                Sha256::digest(&bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            );
         }
         fs::write(&file, serde_json::to_vec(&value).expect("JSON")).expect("mutate wrapper");
         assert_eq!(
@@ -849,10 +854,15 @@ fn test_review_export_rejects_destination_symlink_before_writing() {
     fs::write(dir.join("nested/payload.txt"), "payload").expect("payload");
     let mut wrapper: Value = serde_json::from_slice(&fs::read(dir.join("style.json")).expect("wrapper")).expect("JSON");
     let mut raw: Value = serde_json::from_slice(&fs::read(dir.join("style-tool.json")).expect("raw")).expect("JSON");
-    raw["artifacts"] = serde_json::json!([{"kind":"result","path":"nested/payload.txt","sha256":format!("{:x}",Sha256::digest(b"payload")),"required":true}]);
+    raw["artifacts"] = serde_json::json!([{"kind":"result","path":"nested/payload.txt","sha256":Sha256::digest(b"payload").iter().map(|byte| format!("{byte:02x}")).collect::<String>(),"required":true}]);
     let bytes = serde_json::to_vec(&raw).expect("raw JSON");
     fs::write(dir.join("style-tool.json"), &bytes).expect("raw");
-    wrapper["artifacts"][0]["sha256"] = serde_json::json!(format!("{:x}", Sha256::digest(bytes)));
+    wrapper["artifacts"][0]["sha256"] = serde_json::json!(
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
     fs::write(
         dir.join("style.json"),
         serde_json::to_vec(&wrapper).expect("wrapper JSON"),
@@ -1334,7 +1344,10 @@ fn test_rereview_summary_accepts_external_absolute_manifest_with_provenance() {
     assert_eq!(value["status"], "passed");
     assert_eq!(
         value["data"]["manifest_provenance"]["sha256"],
-        format!("{:x}", Sha256::digest(&bytes))
+        Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
     );
     assert_eq!(
         value["data"]["manifest_provenance"]["path"],
@@ -1426,13 +1439,16 @@ fn test_runtime_snapshot_binds_copy_forwards_context_and_rejects_tampering() {
     fs::create_dir_all(&output).expect("run root");
     let copy = output.join("ci-copy");
     fs::copy(env!("CARGO_BIN_EXE_cpp-infra-ci"), &copy).expect("same executable copy");
-    let binary_sha = format!("{:x}", Sha256::digest(fs::read(&copy).expect("binary")));
+    let binary_sha = Sha256::digest(fs::read(&copy).expect("binary"))
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let snapshot_path = output.join("runtime-snapshot.json");
     let snapshot = serde_json::json!({"schema":1,"bundle_id":"development","tools":[{"name":"cpp-infra-ci","version":version["version"],"revision":version["revision"],"protocol":1,"binary":copy,"executable_sha256":binary_sha}],"offline":true,"stale":false});
     let snapshot_bytes = serde_json::to_vec(&snapshot).expect("snapshot");
     fs::write(&snapshot_path, &snapshot_bytes).expect("snapshot file");
     let context_path = project.join("build/runtime-context.json");
-    let mut context = serde_json::json!({"schema":1,"run_id":plan["run_id"],"task_id":"parent-ci","bundle_id":"development","project":project,"profile":"debug","source_digest":plan["source_digest"],"config_digest":plan["config_digest"],"report_root":output,"runtime_snapshot":snapshot_path,"runtime_snapshot_digest":format!("{:x}",Sha256::digest(&snapshot_bytes))});
+    let mut context = serde_json::json!({"schema":1,"run_id":plan["run_id"],"task_id":"parent-ci","bundle_id":"development","project":project,"profile":"debug","source_digest":plan["source_digest"],"config_digest":plan["config_digest"],"report_root":output,"runtime_snapshot":snapshot_path,"runtime_snapshot_digest":Sha256::digest(&snapshot_bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>()});
     fs::write(&context_path, serde_json::to_vec(&context).expect("context")).expect("context file");
     let report = output.join("parent-ci.json");
     let out = run_with(
@@ -1490,7 +1506,10 @@ fn test_runtime_snapshot_binds_copy_forwards_context_and_rejects_tampering() {
         context["runtime_snapshot_digest"] = serde_json::json!(if failure == "digest" {
             "0".repeat(64)
         } else {
-            format!("{:x}", Sha256::digest(&bytes))
+            Sha256::digest(&bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
         });
         fs::write(&context_path, serde_json::to_vec(&context).expect("context")).expect("context file");
         let out = run_with(
@@ -1518,14 +1537,16 @@ fn test_runtime_plan_pins_selected_tools_and_rejects_missing_or_invalid_revision
     let binary = std::path::Path::new(env!("CARGO_BIN_EXE_cpp-infra-ci"))
         .canonicalize()
         .expect("binary");
-    let mut snapshot = serde_json::json!({"schema":1,"bundle_id":"fixture-source-group","tools":[{"name":"cpp-infra-ci","version":version["version"],"revision":version["revision"],"protocol":1,"binary":binary,"executable_sha256":format!("{:x}",Sha256::digest(fs::read(&binary).expect("binary")))},{"name":"cpp-infra-tools","version":"0.1.0","revision":"a".repeat(40)},{"name":"cpp-infra-style","version":"0.1.0","revision":"b".repeat(40)}],"offline":true,"stale":false});
+    let mut snapshot = serde_json::json!({"schema":1,"bundle_id":"fixture-source-group","tools":[{"name":"cpp-infra-ci","version":version["version"],"revision":version["revision"],"protocol":1,"binary":binary,"executable_sha256":Sha256::digest(fs::read(&binary).expect("binary")).iter().map(|byte| format!("{byte:02x}")).collect::<String>()},{"name":"cpp-infra-tools","version":"0.1.0","revision":"a".repeat(40)},{"name":"cpp-infra-style","version":"0.1.0","revision":"b".repeat(40)}],"offline":true,"stale":false});
     for tool in snapshot["tools"].as_array_mut().expect("tools").iter_mut().skip(1) {
         let binary = bin.path().join(tool["name"].as_str().expect("tool name"));
         tool["protocol"] = serde_json::json!(1);
-        tool["executable_sha256"] = serde_json::json!(format!(
-            "{:x}",
+        tool["executable_sha256"] = serde_json::json!(
             Sha256::digest(fs::read(&binary).expect("fixture binary"))
-        ));
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
         tool["binary"] = serde_json::json!(binary);
     }
     let path = root.path().join("build/pinned-runtime.json");
@@ -1794,11 +1815,11 @@ fn run_with_runtime_parent(
     let binary = std::path::Path::new(env!("CARGO_BIN_EXE_cpp-infra-ci"))
         .canonicalize()
         .expect("CI executable");
-    let snapshot = serde_json::json!({"schema":1,"bundle_id":plan["bundle_id"],"tools":[{"name":"cpp-infra-ci","version":version["version"],"revision":version["revision"],"protocol":1,"binary":binary,"executable_sha256":format!("{:x}",Sha256::digest(fs::read(&binary).expect("CI bytes")))}],"offline":true,"stale":false});
+    let snapshot = serde_json::json!({"schema":1,"bundle_id":plan["bundle_id"],"tools":[{"name":"cpp-infra-ci","version":version["version"],"revision":version["revision"],"protocol":1,"binary":binary,"executable_sha256":Sha256::digest(fs::read(&binary).expect("CI bytes")).iter().map(|byte| format!("{byte:02x}")).collect::<String>()}],"offline":true,"stale":false});
     let snapshot_path = parent.join("runtime-snapshot.json");
     let snapshot_bytes = serde_json::to_vec_pretty(&snapshot).expect("snapshot");
     fs::write(&snapshot_path, &snapshot_bytes).expect("manager snapshot");
-    let context = serde_json::json!({"schema":1,"run_id":parent_id,"task_id":"tools","project":project,"report_root":parent,"bundle_id":plan["bundle_id"],"profile":null,"source_digest":plan["source_digest"],"config_digest":plan["config_digest"],"source_excluded_paths":plan["source_excluded_paths"],"runtime_snapshot":snapshot_path,"runtime_snapshot_digest":format!("{:x}",Sha256::digest(&snapshot_bytes))});
+    let context = serde_json::json!({"schema":1,"run_id":parent_id,"task_id":"tools","project":project,"report_root":parent,"bundle_id":plan["bundle_id"],"profile":null,"source_digest":plan["source_digest"],"config_digest":plan["config_digest"],"source_excluded_paths":plan["source_excluded_paths"],"runtime_snapshot":snapshot_path,"runtime_snapshot_digest":Sha256::digest(&snapshot_bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>()});
     let context_path = parent.join("run-context.json");
     let context_bytes = serde_json::to_vec(&context).expect("context");
     fs::write(&context_path, &context_bytes).expect("manager context");
